@@ -57,7 +57,7 @@ void CRagdollRocket::PropelThink()
 
 	SetNextThink(gpGlobals->curtime + 0.01f);
 
-	DevMsg("Ragdoll Rocketing\n");
+	DevMsg("Ragdoll Rocketing...\n");
 }
 void CRagdollRocket::Explode()
 {
