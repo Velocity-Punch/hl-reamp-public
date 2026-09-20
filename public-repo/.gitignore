@@ -18,9 +18,12 @@ ipch
 *.opensdf
 *.idb
 *.vcxproj
+*.vcxproj.filters
+*.vcxproj.vpc_crc
 *.sln
 *.recipe
 *.sarif
+*.sentinel
 
 # OSX/Linux build products
 *.mak
@@ -57,8 +60,6 @@ config.cfg
 *.tmp
 
 *.pdb
-*.pdb
-*.pdb
 sp/src/game/client/Release_mod_hl2/
 sp/src/game/client/Releasemod_hl2/
 sp/src/game/client/Debug_mod_hl2/
@@ -70,6 +71,4 @@ sp/src/game/server/Debug_mod_hl2/
 *.opendb
 *.db-shm
 *.bin
-*.pdb
-*.pdb
-*.dll
+
