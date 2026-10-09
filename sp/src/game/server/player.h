@@ -296,6 +296,9 @@ public:
 	virtual bool			WantsLagCompensationOnEntity( const CBasePlayer	*pPlayer, const CUserCmd *pCmd, const CBitVec<MAX_EDICTS> *pEntityTransmitBits ) const;
 
 	virtual void			Spawn( void );
+	void					SetGravityInverted( bool bInverted );
+	bool					IsGravityInverted( void ) const { return m_bGravityInverted; }
+	bool					m_bGravityInverted;
 	virtual void			Activate( void );
 	virtual void			SharedSpawn(); // Shared between client and server.
 	virtual void			ForceRespawn( void );

@@ -90,6 +90,29 @@ bool g_bMovementOptimizations = true;
 
 extern IGameMovement *g_pGameMovement;
 
+static bool IsGravityInverted( const CBasePlayer *player )
+{
+	return player->IsGravityInverted() || player->GetGravity() < 0.0f;
+}
+
+static float PlayerGravityDirectionZ( const CBasePlayer *player )
+{
+	return IsGravityInverted( player ) ? 1.0f : -1.0f;
+}
+
+static float PlayerGravityScale( const CBasePlayer *player )
+{
+	float flGravity = fabsf( player->GetGravity() );
+	if ( flGravity == 0.0f )
+		flGravity = 1.0f;
+	return IsGravityInverted( player ) ? -flGravity : flGravity;
+}
+
+static bool IsPlayerStandablePlane( const trace_t &trace, const CBasePlayer *player )
+{
+	return trace.plane.normal.z * -PlayerGravityDirectionZ( player ) >= 0.7f;
+}
+
 
 #if defined( PLAYER_GETTING_STUCK_TESTING )
 
@@ -1305,12 +1328,7 @@ void CGameMovement::DecayPunchAngle( void )
 //-----------------------------------------------------------------------------
 void CGameMovement::StartGravity( void )
 {
-	float ent_gravity;
-	
-	if (player->GetGravity())
-		ent_gravity = player->GetGravity();
-	else
-		ent_gravity = 1.0;
+	float ent_gravity = PlayerGravityScale( player );
 
 	// Add gravity so they'll be in the correct position during movement
 	// yes, this 0.5 looks wrong, but it's not.  
@@ -1380,7 +1398,7 @@ void CGameMovement::CheckWaterJump( void )
 				return;
 		}
 
-		vecStart.z = mv->GetAbsOrigin().z + player->GetViewOffset().z + WATERJUMP_HEIGHT; 
+		vecStart.z = player->EyePosition().z - PlayerGravityDirectionZ( player ) * WATERJUMP_HEIGHT;
 		VectorMA( vecStart, 24.0f, flatforward, vecEnd );
 		VectorMA( vec3_origin, -50.0f, tr.plane.normal, player->m_vecWaterJumpVel );
 
@@ -1389,11 +1407,11 @@ void CGameMovement::CheckWaterJump( void )
 		{
 			// Now trace down to see if we would actually land on a standable surface.
 			VectorCopy( vecEnd, vecStart );
-			vecEnd.z -= 1024.0f;
+			vecEnd.z += PlayerGravityDirectionZ( player ) * 1024.0f;
 			TracePlayerBBox( vecStart, vecEnd, PlayerSolidMask(), COLLISION_GROUP_PLAYER_MOVEMENT, tr );
-			if ( ( tr.fraction < 1.0f ) && ( tr.plane.normal.z >= 0.7 ) )
+			if ( ( tr.fraction < 1.0f ) && IsPlayerStandablePlane( tr, player ) )
 			{
-				mv->m_vecVelocity[2] = 256.0f;			// Push up
+				mv->m_vecVelocity[2] = -PlayerGravityDirectionZ( player ) * 256.0f;
 				mv->m_nOldButtons |= IN_JUMP;		// Don't jump again until released
 				player->AddFlag( FL_WATERJUMP );
 				player->m_flWaterJumpTime = 2000.0f;	// Do this for 2 seconds
@@ -1599,7 +1617,7 @@ void CGameMovement::StepMove( Vector &vecDestination, trace_t &trace )
 	VectorCopy( mv->GetAbsOrigin(), vecEndPos );
 	if ( player->m_Local.m_bAllowAutoMovement )
 	{
-		vecEndPos.z += player->m_Local.m_flStepSize + DIST_EPSILON;
+		vecEndPos.z -= PlayerGravityDirectionZ( player ) * ( player->m_Local.m_flStepSize + DIST_EPSILON );
 	}
 	
 	TracePlayerBBox( mv->GetAbsOrigin(), vecEndPos, PlayerSolidMask(), COLLISION_GROUP_PLAYER_MOVEMENT, trace );
@@ -1615,17 +1633,17 @@ void CGameMovement::StepMove( Vector &vecDestination, trace_t &trace )
 	VectorCopy( mv->GetAbsOrigin(), vecEndPos );
 	if ( player->m_Local.m_bAllowAutoMovement )
 	{
-		vecEndPos.z -= player->m_Local.m_flStepSize + DIST_EPSILON;
+		vecEndPos.z += PlayerGravityDirectionZ( player ) * ( player->m_Local.m_flStepSize + DIST_EPSILON );
 	}
 		
 	TracePlayerBBox( mv->GetAbsOrigin(), vecEndPos, PlayerSolidMask(), COLLISION_GROUP_PLAYER_MOVEMENT, trace );
 	
 	// If we are not on the ground any more then use the original movement attempt.
-	if ( trace.plane.normal[2] < 0.7 )
+	if ( !IsPlayerStandablePlane( trace, player ) )
 	{
 		mv->SetAbsOrigin( vecDownPos );
 		VectorCopy( vecDownVel, mv->m_vecVelocity );
-		float flStepDist = mv->GetAbsOrigin().z - vecPos.z;
+		float flStepDist = ( mv->GetAbsOrigin().z - vecPos.z ) * -PlayerGravityDirectionZ( player );
 		if ( flStepDist > 0.0f )
 		{
 			mv->m_outStepHeight += flStepDist;
@@ -1657,7 +1675,7 @@ void CGameMovement::StepMove( Vector &vecDestination, trace_t &trace )
 		mv->m_vecVelocity.z = vecDownVel.z;
 	}
 	
-	float flStepDist = mv->GetAbsOrigin().z - vecPos.z;
+	float flStepDist = ( mv->GetAbsOrigin().z - vecPos.z ) * -PlayerGravityDirectionZ( player );
 	if ( flStepDist > 0 )
 	{
 		mv->m_outStepHeight += flStepDist;
@@ -1741,15 +1759,10 @@ void CGameMovement::Friction( void )
 //-----------------------------------------------------------------------------
 void CGameMovement::FinishGravity( void )
 {
-	float ent_gravity;
-
 	if ( player->m_flWaterJumpTime )
 		return;
 
-	if ( player->GetGravity() )
-		ent_gravity = player->GetGravity();
-	else
-		ent_gravity = 1.0;
+	float ent_gravity = PlayerGravityScale( player );
 
 	// Get the correct velocity for the end of the dt 
   	mv->m_vecVelocity[2] -= (ent_gravity * GetCurrentGravity() * gpGlobals->frametime * 0.5);
@@ -1978,8 +1991,8 @@ void CGameMovement::StayOnGround( void )
 	trace_t trace;
 	Vector start( mv->GetAbsOrigin() );
 	Vector end( mv->GetAbsOrigin() );
-	start.z += 2;
-	end.z -= player->GetStepSize();
+	start.z -= PlayerGravityDirectionZ( player ) * 2;
+	end.z += PlayerGravityDirectionZ( player ) * player->GetStepSize();
 
 	// See how far up we can go without getting stuck
 
@@ -1994,7 +2007,7 @@ void CGameMovement::StayOnGround( void )
 	if ( trace.fraction > 0.0f &&			// must go somewhere
 		trace.fraction < 1.0f &&			// must hit something
 		!trace.startsolid &&				// can't be embedded in a solid
-		trace.plane.normal[2] >= 0.7 )		// can't hit a steep slope that we can't stand on anyway
+		IsPlayerStandablePlane( trace, player ) )		// can't hit a steep slope that we can't stand on anyway
 	{
 		float flDelta = fabs(mv->GetAbsOrigin().z - trace.endpos.z);
 
@@ -2167,7 +2180,7 @@ void CGameMovement::FullWalkMove( )
 		}
 
 			// If we are falling again, then we must not trying to jump out of water any more.
-		if ( mv->m_vecVelocity[2] < 0 && 
+		if ( mv->m_vecVelocity[2] * PlayerGravityDirectionZ( player ) > 0 &&
 			 player->m_flWaterJumpTime )
 		{
 			player->m_flWaterJumpTime = 0;
@@ -2612,17 +2625,17 @@ bool CGameMovement::CheckJumpButton( void )
 		// v = g * sqrt(2.0 * 45 / g )
 		// v^2 = g * g * 2.0 * 45 / g
 		// v = sqrt( g * 2.0 * 45 )
-		mv->m_vecVelocity[2] = flGroundFactor * flMul;  // 2 * gravity * height
+		mv->m_vecVelocity[2] = -PlayerGravityDirectionZ( player ) * flGroundFactor * flMul;
 	}
 	else
 	{
-		if (startz < 0)
+		if ( startz * PlayerGravityDirectionZ( player ) > 0 )
 		{
-			mv->m_vecVelocity[2] += ((flGroundFactor * flMul) + abs(startz));  // 2 * gravity * height
+			mv->m_vecVelocity[2] -= PlayerGravityDirectionZ( player ) * ( ( flGroundFactor * flMul ) + abs( startz ) );
 		}
 		else
 		{
-			mv->m_vecVelocity[2] += flGroundFactor * flMul;
+			mv->m_vecVelocity[2] -= PlayerGravityDirectionZ( player ) * flGroundFactor * flMul;
 		}
 	}
 	m_iJumpCount++;
@@ -2931,7 +2944,7 @@ int CGameMovement::TryPlayerMove( Vector *pFirstDest, trace_t *pFirstTrace )
 
 		// If the plane we hit has a high z component in the normal, then
 		//  it's probably a floor
-		if (pm.plane.normal[2] > 0.7)
+		if ( IsPlayerStandablePlane( pm, player ) )
 		{
 			blocked |= 1;		// floor
 		}
@@ -3410,15 +3423,10 @@ void CGameMovement::CheckVelocity( void )
 //-----------------------------------------------------------------------------
 void CGameMovement::AddGravity( void )
 {
-	float ent_gravity;
-
 	if ( player->m_flWaterJumpTime )
 		return;
 
-	if (player->GetGravity())
-		ent_gravity = player->GetGravity();
-	else
-		ent_gravity = 1.0;
+	float ent_gravity = PlayerGravityScale( player );
 
 	// Add gravity incorrectly
 	mv->m_vecVelocity[2] -= (ent_gravity * GetCurrentGravity() * gpGlobals->frametime);
@@ -3988,7 +3996,7 @@ void CGameMovement::SetGroundEntity( trace_t *pm )
 //-----------------------------------------------------------------------------
 void TracePlayerBBoxForGround( const Vector& start, const Vector& end, const Vector& minsSrc,
 							  const Vector& maxsSrc, IHandleEntity *player, unsigned int fMask,
-							  int collisionGroup, trace_t& pm )
+							  int collisionGroup, float flGroundNormalZSign, trace_t& pm )
 {
 	VPROF( "TracePlayerBBoxForGround" );
 
@@ -4003,7 +4011,7 @@ void TracePlayerBBoxForGround( const Vector& start, const Vector& end, const Vec
 	maxs.Init( MIN( 0, maxsSrc.x ), MIN( 0, maxsSrc.y ), maxsSrc.z );
 	ray.Init( start, end, mins, maxs );
 	UTIL_TraceRay( ray, fMask, player, collisionGroup, &pm );
-	if ( pm.m_pEnt && pm.plane.normal[2] >= 0.7)
+	if ( pm.m_pEnt && pm.plane.normal[2] * flGroundNormalZSign >= 0.7)
 	{
 		pm.fraction = fraction;
 		pm.endpos = endpos;
@@ -4015,7 +4023,7 @@ void TracePlayerBBoxForGround( const Vector& start, const Vector& end, const Vec
 	maxs = maxsSrc;
 	ray.Init( start, end, mins, maxs );
 	UTIL_TraceRay( ray, fMask, player, collisionGroup, &pm );
-	if ( pm.m_pEnt && pm.plane.normal[2] >= 0.7)
+	if ( pm.m_pEnt && pm.plane.normal[2] * flGroundNormalZSign >= 0.7)
 	{
 		pm.fraction = fraction;
 		pm.endpos = endpos;
@@ -4027,7 +4035,7 @@ void TracePlayerBBoxForGround( const Vector& start, const Vector& end, const Vec
 	maxs.Init( MIN( 0, maxsSrc.x ), maxsSrc.y, maxsSrc.z );
 	ray.Init( start, end, mins, maxs );
 	UTIL_TraceRay( ray, fMask, player, collisionGroup, &pm );
-	if ( pm.m_pEnt && pm.plane.normal[2] >= 0.7)
+	if ( pm.m_pEnt && pm.plane.normal[2] * flGroundNormalZSign >= 0.7)
 	{
 		pm.fraction = fraction;
 		pm.endpos = endpos;
@@ -4039,7 +4047,7 @@ void TracePlayerBBoxForGround( const Vector& start, const Vector& end, const Vec
 	maxs.Init( maxsSrc.x, MIN( 0, maxsSrc.y ), maxsSrc.z );
 	ray.Init( start, end, mins, maxs );
 	UTIL_TraceRay( ray, fMask, player, collisionGroup, &pm );
-	if ( pm.m_pEnt && pm.plane.normal[2] >= 0.7)
+	if ( pm.m_pEnt && pm.plane.normal[2] * flGroundNormalZSign >= 0.7)
 	{
 		pm.fraction = fraction;
 		pm.endpos = endpos;
@@ -4072,7 +4080,7 @@ void CGameMovement::TryTouchGroundInQuadrants( const Vector& start, const Vector
 	mins = minsSrc;
 	maxs.Init( MIN( 0, maxsSrc.x ), MIN( 0, maxsSrc.y ), maxsSrc.z );
 	TryTouchGround( start, end, mins, maxs, fMask, collisionGroup, pm );
-	if ( pm.m_pEnt && pm.plane.normal[2] >= 0.7)
+	if ( pm.m_pEnt && IsPlayerStandablePlane( pm, player ) )
 	{
 		pm.fraction = fraction;
 		pm.endpos = endpos;
@@ -4083,7 +4091,7 @@ void CGameMovement::TryTouchGroundInQuadrants( const Vector& start, const Vector
 	mins.Init( MAX( 0, minsSrc.x ), MAX( 0, minsSrc.y ), minsSrc.z );
 	maxs = maxsSrc;
 	TryTouchGround( start, end, mins, maxs, fMask, collisionGroup, pm );
-	if ( pm.m_pEnt && pm.plane.normal[2] >= 0.7)
+	if ( pm.m_pEnt && IsPlayerStandablePlane( pm, player ) )
 	{
 		pm.fraction = fraction;
 		pm.endpos = endpos;
@@ -4094,7 +4102,7 @@ void CGameMovement::TryTouchGroundInQuadrants( const Vector& start, const Vector
 	mins.Init( minsSrc.x, MAX( 0, minsSrc.y ), minsSrc.z );
 	maxs.Init( MIN( 0, maxsSrc.x ), maxsSrc.y, maxsSrc.z );
 	TryTouchGround( start, end, mins, maxs, fMask, collisionGroup, pm );
-	if ( pm.m_pEnt && pm.plane.normal[2] >= 0.7)
+	if ( pm.m_pEnt && IsPlayerStandablePlane( pm, player ) )
 	{
 		pm.fraction = fraction;
 		pm.endpos = endpos;
@@ -4105,7 +4113,7 @@ void CGameMovement::TryTouchGroundInQuadrants( const Vector& start, const Vector
 	mins.Init( MAX( 0, minsSrc.x ), minsSrc.y, minsSrc.z );
 	maxs.Init( maxsSrc.x, MIN( 0, maxsSrc.y ), maxsSrc.z );
 	TryTouchGround( start, end, mins, maxs, fMask, collisionGroup, pm );
-	if ( pm.m_pEnt && pm.plane.normal[2] >= 0.7)
+	if ( pm.m_pEnt && IsPlayerStandablePlane( pm, player ) )
 	{
 		pm.fraction = fraction;
 		pm.endpos = endpos;
@@ -4144,7 +4152,7 @@ void CGameMovement::CategorizePosition( void )
 
 
 	// Check for a jump.
-	if (mv->m_vecVelocity.z > 250.0f)
+	if ( mv->m_vecVelocity.z * -PlayerGravityDirectionZ( player ) > 250.0f )
 	{
 		SetGroundEntity(NULL);
 		return;
@@ -4152,7 +4160,8 @@ void CGameMovement::CategorizePosition( void )
 
 	// Calculate the start and end position.
 	Vector vecStartPos = mv->GetAbsOrigin();
-	Vector vecEndPos(mv->GetAbsOrigin().x, mv->GetAbsOrigin().y, (mv->GetAbsOrigin().z - 2.0f));
+	Vector vecEndPos( mv->GetAbsOrigin().x, mv->GetAbsOrigin().y,
+		mv->GetAbsOrigin().z + PlayerGravityDirectionZ( player ) * 2.0f );
 
 	// NOTE YWB 7/5/07:  Since we're already doing a traceline here, we'll subsume the StayOnGround (stair debouncing) check into the main traceline we do here to see what we're standing on
 	bool bUnderwater = (player->GetWaterLevel() >= WL_Eyes);
@@ -4161,7 +4170,7 @@ void CGameMovement::CategorizePosition( void )
 		player->GetGroundEntity() != NULL && !bUnderwater)
 	{
 		// if walking and still think we're on ground, we'll extend trace down by stepsize so we don't bounce down slopes
-		vecEndPos.z -= player->GetStepSize();
+		vecEndPos.z += PlayerGravityDirectionZ( player ) * player->GetStepSize();
 		bMoveToEndPos = true;
 	}
 
@@ -4169,15 +4178,17 @@ void CGameMovement::CategorizePosition( void )
 	TracePlayerBBox(vecStartPos, vecEndPos, PlayerSolidMask(), COLLISION_GROUP_PLAYER_MOVEMENT, trace);
 
 	// Steep plane, not on ground.
-	if (trace.plane.normal.z < 0.7f)
+	if ( !IsPlayerStandablePlane( trace, player ) )
 	{
 		// Test four sub-boxes, to see if any of them would have found shallower slope we could actually stand on.
-		TracePlayerBBoxForGround(vecStartPos, vecEndPos, GetPlayerMins(), GetPlayerMaxs(), mv->m_nPlayerHandle.Get(), PlayerSolidMask(), COLLISION_GROUP_PLAYER_MOVEMENT, trace);
-		if (trace.plane.normal[2] < 0.7f)
+		TracePlayerBBoxForGround( vecStartPos, vecEndPos, GetPlayerMins(), GetPlayerMaxs(),
+			mv->m_nPlayerHandle.Get(), PlayerSolidMask(), COLLISION_GROUP_PLAYER_MOVEMENT,
+			-PlayerGravityDirectionZ( player ), trace );
+		if ( !IsPlayerStandablePlane( trace, player ) )
 		{
 			// Too steep.
 			SetGroundEntity(NULL);
-			if ((mv->m_vecVelocity.z > 0.0f) &&
+			if ((mv->m_vecVelocity.z * PlayerGravityDirectionZ( player ) < 0.0f) &&
 				(player->GetMoveType() != MOVETYPE_NOCLIP))
 			{
 				player->m_surfaceFriction = 0.25f;
@@ -4240,10 +4251,11 @@ void CGameMovement::CheckFalling( void )
 			//
 			// They hit the ground.
 			//
-			if( player->GetGroundEntity()->GetAbsVelocity().z < 0.0f )
+			if ( player->GetGroundEntity()->GetAbsVelocity().z * -PlayerGravityDirectionZ( player ) < 0.0f )
 			{
 				// Player landed on a descending object. Subtract the velocity of the ground entity.
-				player->m_Local.m_flFallVelocity += player->GetGroundEntity()->GetAbsVelocity().z;
+				player->m_Local.m_flFallVelocity -=
+					player->GetGroundEntity()->GetAbsVelocity().z * PlayerGravityDirectionZ( player );
 				player->m_Local.m_flFallVelocity = MAX( 0.1f, player->m_Local.m_flFallVelocity );
 			}
 
@@ -4919,7 +4931,7 @@ void CGameMovement::PlayerMove( void )
 	}
 	else
 	{
-		if ( mv->m_vecVelocity.z > 250.0f )
+		if ( mv->m_vecVelocity.z * -PlayerGravityDirectionZ( player ) > 250.0f )
 		{
 			SetGroundEntity( NULL );
 		}
@@ -4931,7 +4943,8 @@ void CGameMovement::PlayerMove( void )
 	// If we are not on ground, store off how fast we are moving down
 	if ( player->GetGroundEntity() == NULL )
 	{
-		player->m_Local.m_flFallVelocity = -mv->m_vecVelocity[ 2 ];
+		player->m_Local.m_flFallVelocity =
+			mv->m_vecVelocity[ 2 ] * PlayerGravityDirectionZ( player );
 	}
 
 	m_nOnLadder = 0;
@@ -5057,10 +5070,10 @@ void CGameMovement::PerformFlyCollisionResolution( trace_t &pm, Vector &move )
 	}
 
 	// stop if on ground
-	if (pm.plane.normal[2] > 0.7)
+	if ( IsPlayerStandablePlane( pm, player ) )
 	{		
 		base.Init();
-		if (mv->m_vecVelocity[2] < GetCurrentGravity() * gpGlobals->frametime)
+		if ( mv->m_vecVelocity[2] * PlayerGravityDirectionZ( player ) > -GetCurrentGravity() * gpGlobals->frametime )
 		{
 			// we're rolling on the ground, add static friction.
 			SetGroundEntity( &pm ); 
@@ -5135,7 +5148,7 @@ void CGameMovement::FullTossMove( void )
 		Accelerate ( wishdir, wishspeed, sv_accelerate.GetFloat() );
 	}
 
-	if ( mv->m_vecVelocity[2] > 0 )
+	if ( mv->m_vecVelocity[2] * -PlayerGravityDirectionZ( player ) > 0 )
 	{
 		SetGroundEntity( NULL );
 	}
@@ -5260,4 +5273,3 @@ void  CGameMovement::TryTouchGround( const Vector& start, const Vector& end, con
 	ray.Init( start, end, mins, maxs );
 	UTIL_TraceRay( ray, fMask, mv->m_nPlayerHandle.Get(), collisionGroup, &pm );
 }
-

@@ -100,6 +100,18 @@ public:
 	virtual			~C_BasePlayer();
 
 	virtual void	Spawn( void );
+	void			SetGravityInverted( bool bInverted );
+	bool			IsGravityInverted( void ) const { return m_bGravityInverted; }
+	bool			m_bGravityInverted;
+	bool			m_bGravityViewInitialized;
+	bool			m_bGravityViewTransition;
+	bool			m_bLastGravityInverted;
+	bool			m_bHasLastGravityView;
+	float			m_flGravityViewTransitionStart;
+	Vector			m_vecGravityViewTransitionStart;
+	QAngle			m_angGravityViewTransitionStart;
+	Vector			m_vecLastGravityView;
+	QAngle			m_angLastGravityView;
 #ifdef HLR
 	void			GroundPound(void);
 
