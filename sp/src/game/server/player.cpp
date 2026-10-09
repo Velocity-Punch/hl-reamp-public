@@ -313,6 +313,7 @@ END_DATADESC()
 BEGIN_DATADESC( CBasePlayer )
 
 	DEFINE_EMBEDDED( m_Local ),
+	DEFINE_FIELD( m_bGravityInverted, FIELD_BOOLEAN ),
 #if defined USES_ECON_ITEMS
 	DEFINE_EMBEDDED( m_AttributeList ),
 #endif
@@ -622,6 +623,7 @@ CBasePlayer *CBasePlayer::CreatePlayer( const char *className, edict_t *ed )
 //-----------------------------------------------------------------------------
 CBasePlayer::CBasePlayer( )
 {
+	m_bGravityInverted = false;
 	AddEFlags( EFL_NO_AUTO_EDICT_ATTACH );
 
 #ifdef _DEBUG
@@ -4793,11 +4795,27 @@ void CBasePlayer::PostThink()
 			VPROF_SCOPE_BEGIN( "CBasePlayer::PostThink-Bounds" );
 			if ( GetFlags() & FL_DUCKING )
 			{
-				SetCollisionBounds( VEC_DUCK_HULL_MIN, VEC_DUCK_HULL_MAX );
+				Vector mins = VEC_DUCK_HULL_MIN;
+				Vector maxs = VEC_DUCK_HULL_MAX;
+				if ( IsGravityInverted() )
+				{
+					const float flMinZ = mins.z;
+					mins.z = -maxs.z;
+					maxs.z = -flMinZ;
+				}
+				SetCollisionBounds( mins, maxs );
 			}
 			else
 			{
-				SetCollisionBounds( VEC_HULL_MIN, VEC_HULL_MAX );
+				Vector mins = VEC_HULL_MIN;
+				Vector maxs = VEC_HULL_MAX;
+				if ( IsGravityInverted() )
+				{
+					const float flMinZ = mins.z;
+					mins.z = -maxs.z;
+					maxs.z = -flMinZ;
+				}
+				SetCollisionBounds( mins, maxs );
 			}
 			VPROF_SCOPE_END();
 
@@ -5707,13 +5725,29 @@ int CBasePlayer::Restore( IRestore &restore )
 	{
 		// Use the crouch HACK
 		FixPlayerCrouchStuck( this );
-		UTIL_SetSize(this, VEC_DUCK_HULL_MIN, VEC_DUCK_HULL_MAX);
+		Vector mins = VEC_DUCK_HULL_MIN;
+		Vector maxs = VEC_DUCK_HULL_MAX;
+		if ( IsGravityInverted() )
+		{
+			const float flMinZ = mins.z;
+			mins.z = -maxs.z;
+			maxs.z = -flMinZ;
+		}
+		UTIL_SetSize( this, mins, maxs );
 		m_Local.m_bDucked = true;
 	}
 	else
 	{
 		m_Local.m_bDucked = false;
-		UTIL_SetSize(this, VEC_HULL_MIN, VEC_HULL_MAX);
+		Vector mins = VEC_HULL_MIN;
+		Vector maxs = VEC_HULL_MAX;
+		if ( IsGravityInverted() )
+		{
+			const float flMinZ = mins.z;
+			mins.z = -maxs.z;
+			maxs.z = -flMinZ;
+		}
+		UTIL_SetSize( this, mins, maxs );
 	}
 
 	// We need to get at m_vecAbsOrigin as it was restored but can't let it be
@@ -8488,6 +8522,7 @@ void SendProxy_CropFlagsToPlayerFlagBitsLength( const SendProp *pProp, const voi
 		SendPropEHandle(SENDINFO(m_hVehicle)),
 		SendPropEHandle(SENDINFO(m_hUseEntity)),
 		SendPropInt		(SENDINFO(m_iHealth), -1, SPROP_VARINT | SPROP_CHANGES_OFTEN ),
+		SendPropBool	(SENDINFO(m_bGravityInverted)),
 		SendPropInt		(SENDINFO(m_lifeState), 3, SPROP_UNSIGNED ),
 		SendPropInt		(SENDINFO(m_iBonusProgress), 15 ),
 		SendPropInt		(SENDINFO(m_iBonusChallenge), 4 ),

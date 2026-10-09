@@ -355,7 +355,12 @@ Vector CBasePlayer::EyePosition( )
 			}
 		}
 #endif
-		return BaseClass::EyePosition();
+		Vector eyePosition = BaseClass::EyePosition();
+		if ( IsGravityInverted() && !IsObserver() )
+		{
+			eyePosition.z = GetAbsOrigin().z - ( eyePosition.z - GetAbsOrigin().z );
+		}
+		return eyePosition;
 	}
 }
 
@@ -373,14 +378,22 @@ const Vector CBasePlayer::GetPlayerMins( void ) const
 	}
 	else
 	{
+		Vector mins;
+		Vector maxs;
 		if ( GetFlags() & FL_DUCKING )
 		{
-			return VEC_DUCK_HULL_MIN_SCALED( this );
+			mins = VEC_DUCK_HULL_MIN_SCALED( this );
+			maxs = VEC_DUCK_HULL_MAX_SCALED( this );
 		}
 		else
 		{
-			return VEC_HULL_MIN_SCALED( this );
+			mins = VEC_HULL_MIN_SCALED( this );
+			maxs = VEC_HULL_MAX_SCALED( this );
 		}
+
+		if ( IsGravityInverted() )
+			mins.z = -maxs.z;
+		return mins;
 	}
 }
 
@@ -397,15 +410,53 @@ const Vector CBasePlayer::GetPlayerMaxs( void ) const
 	}
 	else
 	{
+		Vector mins;
+		Vector maxs;
 		if ( GetFlags() & FL_DUCKING )
 		{
-			return VEC_DUCK_HULL_MAX_SCALED( this );
+			mins = VEC_DUCK_HULL_MIN_SCALED( this );
+			maxs = VEC_DUCK_HULL_MAX_SCALED( this );
 		}
 		else
 		{
-			return VEC_HULL_MAX_SCALED( this );
+			mins = VEC_HULL_MIN_SCALED( this );
+			maxs = VEC_HULL_MAX_SCALED( this );
 		}
+
+		if ( IsGravityInverted() )
+			maxs.z = -mins.z;
+		return maxs;
 	}
+}
+
+void CBasePlayer::SetGravityInverted( bool bInverted )
+{
+	const bool bStateChanged = m_bGravityInverted != bInverted;
+	const float flHullHeight = bStateChanged ? GetPlayerMaxs().z - GetPlayerMins().z : 0.0f;
+	Vector hullMins = ( GetFlags() & FL_DUCKING ) ? VEC_DUCK_HULL_MIN : VEC_HULL_MIN;
+	Vector hullMaxs = ( GetFlags() & FL_DUCKING ) ? VEC_DUCK_HULL_MAX : VEC_HULL_MAX;
+	m_bGravityInverted = bInverted;
+
+	float flGravity = fabsf( GetGravity() );
+	if ( flGravity == 0.0f )
+		flGravity = 1.0f;
+	SetGravity( bInverted ? -flGravity : flGravity );
+
+	if ( bInverted )
+	{
+		const float flMinZ = hullMins.z;
+		hullMins.z = -hullMaxs.z;
+		hullMaxs.z = -flMinZ;
+	}
+
+	if ( bStateChanged )
+	{
+		Vector vecOrigin = GetAbsOrigin();
+		vecOrigin.z += bInverted ? flHullHeight : -flHullHeight;
+		SetAbsOrigin( vecOrigin );
+		SetGroundEntity( NULL );
+	}
+	SetCollisionBounds( hullMins, hullMaxs );
 }
 
 //-----------------------------------------------------------------------------
@@ -1585,6 +1636,46 @@ void CBasePlayer::CalcView( Vector &eyeOrigin, QAngle &eyeAngles, float &zNear, 
 	{
 		CalcVehicleView( pVehicle, eyeOrigin, eyeAngles, zNear, zFar, fov );
 	}
+	if ( !IsObserver() && IsGravityInverted() )
+		eyeAngles[ROLL] += 180.0f;
+#if defined( CLIENT_DLL )
+	const float flGravityViewTransitionTime = 0.5f;
+	if ( !m_bGravityViewInitialized )
+	{
+		m_bGravityViewInitialized = true;
+		m_bLastGravityInverted = IsGravityInverted();
+	}
+	else if ( m_bLastGravityInverted != IsGravityInverted() )
+	{
+		m_bLastGravityInverted = IsGravityInverted();
+		if ( m_bHasLastGravityView )
+		{
+			m_vecGravityViewTransitionStart = m_vecLastGravityView;
+			m_angGravityViewTransitionStart = m_angLastGravityView;
+			m_flGravityViewTransitionStart = gpGlobals->curtime;
+			m_bGravityViewTransition = true;
+		}
+	}
+
+	if ( m_bGravityViewTransition )
+	{
+		const float flBlend = clamp(
+			( gpGlobals->curtime - m_flGravityViewTransitionStart ) / flGravityViewTransitionTime,
+			0.0f, 1.0f );
+		VectorLerp( m_vecGravityViewTransitionStart, eyeOrigin, flBlend, eyeOrigin );
+		for ( int i = 0; i < 3; ++i )
+		{
+			const float flAngleDelta = AngleNormalize( eyeAngles[i] - m_angGravityViewTransitionStart[i] );
+			eyeAngles[i] = AngleNormalize( m_angGravityViewTransitionStart[i] + flAngleDelta * flBlend );
+		}
+		if ( flBlend >= 1.0f )
+			m_bGravityViewTransition = false;
+	}
+
+	m_vecLastGravityView = eyeOrigin;
+	m_angLastGravityView = eyeAngles;
+	m_bHasLastGravityView = true;
+#endif
 	// NVNT update fov on the haptics dll for input scaling.
 #if defined( CLIENT_DLL )
 	if(IsLocalPlayer() && haptics)
@@ -1856,6 +1947,9 @@ void CBasePlayer::MakeTracer( const Vector &vecTracerSrc, const trace_t &tr, int
 
 void CBasePlayer::SharedSpawn()
 {
+	if ( m_bGravityInverted )
+		SetGravity( fabsf( GetGravity() ) );
+	m_bGravityInverted = false;
 	SetMoveType( MOVETYPE_WALK );
 	SetSolid( SOLID_BBOX );
 	AddSolidFlags( FSOLID_NOT_STANDABLE );
@@ -2119,4 +2213,3 @@ bool fogparams_t::operator !=( const fogparams_t& other ) const
 
 	return false;
 }
-

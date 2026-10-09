@@ -464,33 +464,17 @@ void CHLRGravShifter::Touch(CBaseEntity *pOther)
 		RemoveSolidFlags(FSOLID_TRIGGER);
 		//m_hSpitEffect->StopParticleSystem();
 		SetModelName(NULL_STRING);
-		IPhysicsEnvironment	*physenv = physics->GetActiveEnvironmentByIndex(0);
 		CBasePlayer *pPlayer = UTIL_GetLocalPlayer();
-		//IPhysicsObject *pVPhysics = pPlayer->VPhysicsGetObject();
-		QAngle angView = pPlayer->EyeAngles();
-		angView[ROLL] += 180.f;
-		pPlayer->SnapEyeAngles(angView);
-		pPlayer->SetAbsAngles(-GetAbsAngles());
-		Vector vOffset = pPlayer->GetViewOffset();
-		pPlayer->SetViewOffset(-vOffset);
-		assert(physenv);
-		physenv->SetGravity(Vector(0, 0, GetCurrentGravity()));
-		pPlayer->SetGravity(-1);
-		pPlayer->SetGroundEntity(NULL);
+		pPlayer->SetGravityInverted( true );
 		SetThink(&CHLRGravShifter::ResetGrav);
 		SetNextThink(gpGlobals->curtime + 30.0f);
 	}
 }
 void CHLRGravShifter::ResetGrav(void)
 {
-	IPhysicsEnvironment	*physenv = physics->GetActiveEnvironmentByIndex(0);
-	physenv->SetGravity(Vector(0, 0, -GetCurrentGravity()));
 	CBasePlayer *pPlayer = UTIL_GetLocalPlayer();
-	pPlayer->SetAbsAngles(-GetAbsAngles());
-	QAngle angView = pPlayer->EyeAngles();
-	angView[ROLL] += 180.0f;
-
-	pPlayer->SnapEyeAngles(angView);
+	if ( pPlayer )
+		pPlayer->SetGravityInverted( false );
 	Kill();
 }
 

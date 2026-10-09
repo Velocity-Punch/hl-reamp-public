@@ -325,6 +325,7 @@ END_RECV_TABLE()
 		RecvPropEHandle( RECVINFO(m_hUseEntity) ),
 
 		RecvPropInt		(RECVINFO(m_iHealth)),
+		RecvPropBool	(RECVINFO(m_bGravityInverted)),
 		RecvPropInt		(RECVINFO(m_lifeState)),
 
 		RecvPropInt		(RECVINFO(m_iBonusProgress)),
@@ -395,6 +396,7 @@ BEGIN_PREDICTION_DATA( C_BasePlayer )
 	DEFINE_PRED_TYPEDESCRIPTION( m_Local, CPlayerLocalData ),
 	DEFINE_PRED_TYPEDESCRIPTION( pl, CPlayerState ),
 
+	DEFINE_PRED_FIELD( m_bGravityInverted, FIELD_BOOLEAN, FTYPEDESC_INSENDTABLE ),
 	DEFINE_PRED_FIELD( m_iFOV, FIELD_INTEGER, FTYPEDESC_INSENDTABLE ),
 	DEFINE_PRED_FIELD( m_hZoomOwner, FIELD_EHANDLE, FTYPEDESC_INSENDTABLE ),
 	DEFINE_PRED_FIELD( m_flFOVTime, FIELD_FLOAT, 0 ),
@@ -459,6 +461,16 @@ LINK_ENTITY_TO_CLASS( player, C_BasePlayer );
 // -------------------------------------------------------------------------------- //
 C_BasePlayer::C_BasePlayer() : m_iv_vecViewOffset( "C_BasePlayer::m_iv_vecViewOffset" )
 {
+	m_bGravityInverted = false;
+	m_bGravityViewInitialized = false;
+	m_bGravityViewTransition = false;
+	m_bLastGravityInverted = false;
+	m_bHasLastGravityView = false;
+	m_flGravityViewTransitionStart = 0.0f;
+	m_vecGravityViewTransitionStart.Init();
+	m_angGravityViewTransitionStart.Init();
+	m_vecLastGravityView.Init();
+	m_angLastGravityView.Init();
 	AddVar( &m_vecViewOffset, &m_iv_vecViewOffset, LATCH_SIMULATION_VAR );
 	
 #ifdef _DEBUG																
